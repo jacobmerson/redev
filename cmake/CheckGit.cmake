@@ -121,6 +121,13 @@ function(CheckGitSetup)
       if(IN_GIT_REPO)
         add_dependencies(redev_git_version AlwaysCheckGit)
       else()
+        if (NOT EXISTS ${post_configure_dir})
+            file(MAKE_DIRECTORY ${post_configure_dir})
+        endif ()
+
+        if (NOT EXISTS ${post_configure_dir}/redev_git_version.h)
+            file(COPY ${pre_configure_dir}/redev_git_version.h DESTINATION ${post_configure_dir})
+        endif()
         configure_file(${pre_configure_file} ${post_configure_file} @ONLY)
       endif()
 
