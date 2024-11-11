@@ -51,6 +51,7 @@ set(REDEV_SOURCES
   redev_time.cpp
   redev_assert.cpp
   redev_strings.cpp
+  redev_adios_channel.cpp
 )
 
 add_library(redev ${REDEV_SOURCES})

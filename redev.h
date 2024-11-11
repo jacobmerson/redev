@@ -10,10 +10,10 @@
 #include <utility>
 #include <variant>
 
+#include "redev_adios_channel.h"
 #include "redev_bidirectional_comm.h"
 #include "redev_channel.h"
 #include "redev_partition.h"
-#include "redev_adios_channel.h"
 
 namespace redev {
 
@@ -199,15 +199,7 @@ public:
   [[nodiscard]] Channel
   CreateAdiosChannel(std::string name, adios2::Params params,
                      TransportType transportType = TransportType::BP4,
-                     std::string path = {}) {
-    REDEV_FUNCTION_TIMER;
-    if(RankParticipates()) {
-      return AdiosChannel{
-          adios,       comm, std::move(name), std::move(params), transportType,
-          processType, ptn,  std::move(path), noClients};
-    }
-    return NoOpChannel{};
-  }
+                     std::string path = {});
   [[nodiscard]] ProcessType GetProcessType() const noexcept;
   [[nodiscard]] const Partition &GetPartition() const noexcept;
   [[nodiscard]] bool RankParticipates() const noexcept;
