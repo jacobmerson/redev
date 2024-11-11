@@ -230,5 +230,118 @@ void AdiosChannel::openEnginesBP4(bool noClients,
     REDEV_ALWAYS_ASSERT(s2cEngine);
   }
 }
+AdiosChannel::AdiosChannel(adios2::ADIOS &adios, MPI_Comm comm,
+                           std::string name, adios2::Params params,
+                           TransportType transportType, ProcessType processType,
+                           Partition &partition, std::string path,
+                           bool noClients)
+    : comm_(comm), process_type_(processType), partition_(partition)
+
+{
+  REDEV_FUNCTION_TIMER;
+  MPI_Comm_rank(comm, &rank_);
+  auto s2cName = path + name + "_s2c";
+  auto c2sName = path + name + "_c2s";
+  s2c_io_ = adios.DeclareIO(s2cName);
+  c2s_io_ = adios.DeclareIO(c2sName);
+  if (transportType == TransportType::SST && noClients == true) {
+    // TODO log message here
+    transportType = TransportType::BP4;
+  }
+  std::string engineType;
+  switch (transportType) {
+  case TransportType::BP4:
+    engineType = "BP4";
+    s2cName = s2cName + ".bp";
+    c2sName = c2sName + ".bp";
+    break;
+  case TransportType::SST:
+    engineType = "SST";
+    break;
+    // no default case. This will cause a compiler error if we do not handle a
+    // an engine type that has been defined in the TransportType enum.
+    // (-Werror=switch)
+  }
+  s2c_io_.SetEngine(engineType);
+  c2s_io_.SetEngine(engineType);
+  s2c_io_.SetParameters(params);
+  c2s_io_.SetParameters(params);
+  REDEV_ALWAYS_ASSERT(s2c_io_.EngineType() == c2s_io_.EngineType());
+  switch (transportType) {
+  case TransportType::SST:
+    openEnginesSST(noClients, s2cName, c2sName, s2c_io_, c2s_io_, s2c_engine_,
+                   c2s_engine_);
+    break;
+  case TransportType::BP4:
+    openEnginesBP4(noClients, s2cName, c2sName, s2c_io_, c2s_io_, s2c_engine_,
+                   c2s_engine_);
+    break;
+  }
+  // TODO pull begin/end step out of Setup/SendReceive metadata functions
+  // begin step
+  // send metadata
+  Setup(s2c_io_, s2c_engine_);
+  num_server_ranks_ = SendServerCommSizeToClient(s2c_io_, s2c_engine_);
+  num_client_ranks_ = SendClientCommSizeToServer(c2s_io_, c2s_engine_);
+  // end step
+}
+AdiosChannel::~AdiosChannel() {
+  REDEV_FUNCTION_TIMER;
+  // NEED TO CHECK that the engine exists before trying to close it because it
+  // could be in a moved from state
+  if (s2c_engine_) {
+    s2c_engine_.Close();
+  }
+  if (c2s_engine_) {
+    c2s_engine_.Close();
+  }
+}
+void AdiosChannel::BeginSendCommunicationPhase() {
+  REDEV_FUNCTION_TIMER;
+  adios2::StepStatus status;
+  switch (process_type_) {
+  case ProcessType::Client:
+    status = c2s_engine_.BeginStep();
+    break;
+  case ProcessType::Server:
+    status = s2c_engine_.BeginStep();
+    break;
+  }
+  REDEV_ALWAYS_ASSERT(status == adios2::StepStatus::OK);
+}
+void AdiosChannel::EndSendCommunicationPhase() {
+  switch (process_type_) {
+  case ProcessType::Client:
+    c2s_engine_.EndStep();
+    break;
+  case ProcessType::Server:
+    s2c_engine_.EndStep();
+    break;
+  }
+}
+void AdiosChannel::BeginReceiveCommunicationPhase() {
+  REDEV_FUNCTION_TIMER;
+  adios2::StepStatus status;
+  switch (process_type_) {
+  case ProcessType::Client:
+    status = s2c_engine_.BeginStep();
+    break;
+  case ProcessType::Server:
+    status = c2s_engine_.BeginStep();
+    break;
+  }
+  REDEV_ALWAYS_ASSERT(status == adios2::StepStatus::OK);
+}
+void AdiosChannel::EndReceiveCommunicationPhase() {
+  REDEV_FUNCTION_TIMER;
+  switch (process_type_) {
+  case ProcessType::Client:
+    s2c_engine_.EndStep();
+    break;
+  case ProcessType::Server:
+    c2s_engine_.EndStep();
+    break;
+  }
+}
 
 }

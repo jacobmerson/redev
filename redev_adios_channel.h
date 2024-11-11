@@ -14,57 +14,7 @@ public:
   AdiosChannel(adios2::ADIOS &adios, MPI_Comm comm, std::string name,
                adios2::Params params, TransportType transportType,
                ProcessType processType, Partition &partition, std::string path,
-               bool noClients = false)
-      : comm_(comm), process_type_(processType), partition_(partition)
-
-  {
-    REDEV_FUNCTION_TIMER;
-    MPI_Comm_rank(comm, &rank_);
-    auto s2cName = path + name + "_s2c";
-    auto c2sName = path + name + "_c2s";
-    s2c_io_ = adios.DeclareIO(s2cName);
-    c2s_io_ = adios.DeclareIO(c2sName);
-    if (transportType == TransportType::SST && noClients == true) {
-      // TODO log message here
-      transportType = TransportType::BP4;
-    }
-    std::string engineType;
-    switch (transportType) {
-    case TransportType::BP4:
-      engineType = "BP4";
-      s2cName = s2cName + ".bp";
-      c2sName = c2sName + ".bp";
-      break;
-    case TransportType::SST:
-      engineType = "SST";
-      break;
-      // no default case. This will cause a compiler error if we do not handle a
-      // an engine type that has been defined in the TransportType enum.
-      // (-Werror=switch)
-    }
-    s2c_io_.SetEngine(engineType);
-    c2s_io_.SetEngine(engineType);
-    s2c_io_.SetParameters(params);
-    c2s_io_.SetParameters(params);
-    REDEV_ALWAYS_ASSERT(s2c_io_.EngineType() == c2s_io_.EngineType());
-    switch (transportType) {
-    case TransportType::SST:
-      openEnginesSST(noClients, s2cName, c2sName, s2c_io_, c2s_io_, s2c_engine_,
-                     c2s_engine_);
-      break;
-    case TransportType::BP4:
-      openEnginesBP4(noClients, s2cName, c2sName, s2c_io_, c2s_io_, s2c_engine_,
-                     c2s_engine_);
-      break;
-    }
-    // TODO pull begin/end step out of Setup/SendReceive metadata functions
-    // begin step
-    // send metadata
-    Setup(s2c_io_, s2c_engine_);
-    num_server_ranks_ = SendServerCommSizeToClient(s2c_io_, s2c_engine_);
-    num_client_ranks_ = SendClientCommSizeToServer(c2s_io_, c2s_engine_);
-    // end step
-  }
+               bool noClients = false);
   // don't allow copying of class because it creates
   AdiosChannel(const AdiosChannel &) = delete;
   AdiosChannel operator=(const AdiosChannel &) = delete;
@@ -81,86 +31,16 @@ public:
         partition_(o.partition_) {REDEV_FUNCTION_TIMER;}
   AdiosChannel operator=(AdiosChannel &&) = delete;
   // FIXME IMPL RULE OF 5
-  ~AdiosChannel() {
-    REDEV_FUNCTION_TIMER;
-    // NEED TO CHECK that the engine exists before trying to close it because it
-    // could be in a moved from state
-    if (s2c_engine_) {
-      s2c_engine_.Close();
-    }
-    if (c2s_engine_) {
-      c2s_engine_.Close();
-    }
-  }
+  ~AdiosChannel();
   template <typename T>
-  [[nodiscard]] BidirectionalComm<T> CreateComm(std::string name, MPI_Comm comm) {
-    REDEV_FUNCTION_TIMER;
-    // TODO, remove s2c/c2s destinction on variable names then use std::move
-    // name
-    if(comm != MPI_COMM_NULL) {
-      auto s2c = std::make_unique<AdiosComm<T>>(comm, num_client_ranks_,
-                                                s2c_engine_, s2c_io_, name);
-      auto c2s = std::make_unique<AdiosComm<T>>(comm, num_server_ranks_,
-                                                c2s_engine_, c2s_io_, name);
-      switch (process_type_) {
-      case ProcessType::Client:
-        return {std::move(c2s), std::move(s2c)};
-      case ProcessType::Server:
-        return {std::move(s2c), std::move(c2s)};
-      }
-    }
-    return {std::make_unique<NoOpComm<T>>(), std::make_unique<NoOpComm<T>>()};
-  }
+  [[nodiscard]] BidirectionalComm<T> CreateComm(std::string name, MPI_Comm comm);
 
   // TODO s2c/c2s Engine/IO -> send/receive Engine/IO. This removes need for all
   // the switch statements...
-  void BeginSendCommunicationPhase() {
-    REDEV_FUNCTION_TIMER;
-    adios2::StepStatus status;
-    switch (process_type_) {
-    case ProcessType::Client:
-      status = c2s_engine_.BeginStep();
-      break;
-    case ProcessType::Server:
-      status = s2c_engine_.BeginStep();
-      break;
-    }
-    REDEV_ALWAYS_ASSERT(status == adios2::StepStatus::OK);
-  }
-  void EndSendCommunicationPhase() {
-    switch (process_type_) {
-    case ProcessType::Client:
-      c2s_engine_.EndStep();
-      break;
-    case ProcessType::Server:
-      s2c_engine_.EndStep();
-      break;
-    }
-  }
-  void BeginReceiveCommunicationPhase() {
-    REDEV_FUNCTION_TIMER;
-    adios2::StepStatus status;
-    switch (process_type_) {
-    case ProcessType::Client:
-      status = s2c_engine_.BeginStep();
-      break;
-    case ProcessType::Server:
-      status = c2s_engine_.BeginStep();
-      break;
-    }
-    REDEV_ALWAYS_ASSERT(status == adios2::StepStatus::OK);
-  }
-  void EndReceiveCommunicationPhase() {
-    REDEV_FUNCTION_TIMER;
-    switch (process_type_) {
-    case ProcessType::Client:
-      s2c_engine_.EndStep();
-      break;
-    case ProcessType::Server:
-      c2s_engine_.EndStep();
-      break;
-    }
-  }
+  void BeginSendCommunicationPhase();
+  void EndSendCommunicationPhase();
+  void BeginReceiveCommunicationPhase();
+  void EndReceiveCommunicationPhase();
 
 private:
   void openEnginesBP4(bool noClients, std::string s2cName, std::string c2sName,
@@ -191,5 +71,7 @@ private:
   Partition &partition_;
 };
 } // namespace redev
+
+#include "redev_adios_channel_impl.h"
 
 #endif // REDEV__REDEV_ADIOS_CHANNEL_H
