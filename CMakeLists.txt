@@ -1,9 +1,12 @@
-cmake_minimum_required(VERSION 3.15.0...3.21.0)
+cmake_minimum_required(VERSION 3.21.0)
 
 project(redev VERSION 4.3.1 LANGUAGES C CXX) #C is required to find MPI_C
 
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
+
+# use _ROOT variables for configurations
+cmake_policy(SET CMP0074 NEW)
 
 include(cmake/CheckGit.cmake)
 CheckGitSetup()
@@ -28,6 +31,8 @@ find_package(perfstubs REQUIRED)
 set(REDEV_HEADERS
   redev.h
   redev_adios_channel.h
+  redev_adios_comm_decl.h
+  redev_adios_comm.h
   redev_assert.h
   redev_bidirectional_comm.h
   redev_channel.h
@@ -46,12 +51,12 @@ set(REDEV_SOURCES
   redev_time.cpp
   redev_assert.cpp
   redev_strings.cpp
-  )
+)
 
 add_library(redev ${REDEV_SOURCES})
 target_compile_features(redev PUBLIC cxx_std_17)
 target_link_libraries(redev PRIVATE redev_git_version)
-target_link_libraries(redev PUBLIC adios2::cxx11_mpi MPI::MPI_C perfstubs)
+target_link_libraries(redev PUBLIC adios2::cxx11_mpi adios2::adios2 MPI::MPI_C perfstubs)
 target_compile_options(redev PRIVATE -Werror=switch)
 if(HAS_ASAN)
   target_compile_options(redev PRIVATE -fsanitize=address -fno-omit-frame-pointer)
@@ -75,7 +80,7 @@ if(BUILD_TESTING)
 
   function(add_exe NAME)
     add_executable(${NAME} ${NAME}.cpp)
-    target_link_libraries(${NAME} redev)
+    target_link_libraries(${NAME} PUBLIC redev adios2::cxx11_mpi adios2::adios2)
     if(HAS_ASAN)
       target_compile_options(${NAME} PRIVATE -fsanitize=address -fno-omit-frame-pointer)
       target_link_libraries(${NAME} asan rt)

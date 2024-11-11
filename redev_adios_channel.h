@@ -1,6 +1,9 @@
 #ifndef REDEV_REDEV_ADIOS_CHANNEL_H
 #define REDEV_REDEV_ADIOS_CHANNEL_H
+#include "redev_adios_comm.h"
 #include "redev_assert.h"
+#include "redev_bidirectional_comm.h"
+#include "redev_partition.h"
 #include "redev_profile.h"
 #include <adios2.h>
 
