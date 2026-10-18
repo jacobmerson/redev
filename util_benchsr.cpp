@@ -55,12 +55,13 @@ void sendRecvRdv(MPI_Comm mpiComm, const bool isRdv, const int mbpr, const int r
   //the cuts won't be used since getRank(...) won't be called
   auto cuts = redev::Reals(rdvRanks);
   auto ptn = redev::RCBPtn(dim,ranks,cuts);
-  redev::Redev rdv(mpiComm,redev::Partition{std::move(ptn)},static_cast<redev::ProcessType>(isRdv));
+  redev::Config config;
+  config.Global().Set("adios2.bp4", "OpenTimeoutSecs", "2");
+  redev::Redev rdv(mpiComm,redev::Partition{std::move(ptn)},static_cast<redev::ProcessType>(isRdv), false, std::move(config));
   std::string name = "foo";
   std::stringstream ss;
   ss << mbpr << " B rdv ";
-  adios2::Params params{ {"Streaming", "On"}, {"OpenTimeoutSecs", "2"}};
-  auto channel = rdv.CreateAdiosChannel(name, params, redev::TransportType::BP4);
+  auto channel = rdv.CreateChannel(name);
   auto commPair = channel.CreateComm<redev::LO>(name, rdv.GetMPIComm());
   // the non-rendezvous app sends to the rendezvous app
   if(!isRdv) {

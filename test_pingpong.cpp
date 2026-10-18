@@ -23,11 +23,11 @@ int main(int argc, char** argv) {
   auto ranks = isRdv ? redev::LOs({0}) : redev::LOs(1);
   auto cuts = isRdv ? redev::Reals({0}) : redev::Reals(1);
   auto ptn = redev::RCBPtn(dim,ranks,cuts);
-  redev::Redev rdv(MPI_COMM_WORLD,redev::Partition{std::move(ptn)},static_cast<redev::ProcessType>(isRdv));
+  redev::Config config;
+  config.Global().Set("adios2.bp4", "OpenTimeoutSecs", "2");
+  redev::Redev rdv(MPI_COMM_WORLD,redev::Partition{std::move(ptn)},static_cast<redev::ProcessType>(isRdv), false, std::move(config));
   std::string name = "foo";
-  adios2::Params params{ {"Streaming", "On"}, {"OpenTimeoutSecs", "2"}};
-  auto channel = rdv.CreateAdiosChannel(name, params,
-                                                    redev::TransportType::BP4);
+  auto channel = rdv.CreateChannel(name);
   auto commPair = channel.CreateComm<redev::LO>(name, MPI_COMM_WORLD);
   for(int iter=0; iter<3; iter++) {
     // the non-rendezvous app sends to the rendezvous app

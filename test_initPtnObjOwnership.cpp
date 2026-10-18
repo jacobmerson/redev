@@ -4,11 +4,15 @@
 const std::string timeout="8";
 
 auto makeRedev(int dim, redev::LOs& ranks, redev::Reals& cuts, bool isRendezvous) {
+  redev::Config config;
+  config.Global().Set("adios2.bp4", "OpenTimeoutSecs", timeout);
   if(static_cast<redev::ProcessType>(isRendezvous) == redev::ProcessType::Server) {
     auto ptn = redev::RCBPtn(dim,ranks,cuts);
-    return redev::Redev(MPI_COMM_WORLD,redev::Partition{ptn});
+    return redev::Redev(MPI_COMM_WORLD,redev::Partition{ptn},
+                        redev::ProcessType::Server, false, std::move(config));
   }
-  return redev::Redev(MPI_COMM_WORLD);
+  return redev::Redev(MPI_COMM_WORLD, redev::ProcessType::Client, false,
+                      std::move(config));
 }
 
 void client() {
@@ -17,9 +21,7 @@ void client() {
   auto cuts = redev::Reals(1);
   const bool isRendezvous = false;
   auto rdv = makeRedev(dim, ranks, cuts, isRendezvous);
-  adios2::Params params{ {"Streaming", "On"}, {"OpenTimeoutSecs", timeout}};
-  auto channel = rdv.CreateAdiosChannel("foo", params,
-                                                    redev::TransportType::BP4);
+  auto channel = rdv.CreateChannel("foo");
   auto commPair = channel.CreateComm<redev::LO>("foo", MPI_COMM_WORLD);
 }
 
@@ -29,9 +31,7 @@ void server() {
   auto cuts = redev::Reals({0});
   const bool isRendezvous=true;
   auto rdv = makeRedev(dim, ranks, cuts, isRendezvous);
-  adios2::Params params{ {"Streaming", "On"}, {"OpenTimeoutSecs", timeout}};
-  auto channel = rdv.CreateAdiosChannel("foo", params,
-                                                    redev::TransportType::BP4);
+  auto channel = rdv.CreateChannel("foo");
   auto commPair = channel.CreateComm<redev::LO>("foo", MPI_COMM_WORLD);
 }
 

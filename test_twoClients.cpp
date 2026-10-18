@@ -23,13 +23,14 @@
  * A dummy [RCBPtn](\ref redev::RCBPtn) object is created for construction of the 
  * [Redev](\ref redev::Redev) instance; the partition is **not** used for creating message layout
  * arrays in the client and server code below.
- * The ADIOS2 parameters for the [BP4](https://adios2.readthedocs.io/en/latest/engines/engines.html#bp4)
- * engine (the default when `isSST` is `false`) are then set and passed into the functions for the client and server.
+ * A redev::Config selects the transport (BP4, the default when `isSST` is
+ * `false`, or SST) and its settings, and is passed to the Redev constructor.
+ * The server's transport is sent to the clients when each channel is created.
  * \snippet{lineno} test_twoClients.cpp Main
  *
  * \par Client Setup
  *
- * Client setup begins with creation of the redev::BidirectionalComm communication object via the call to redev::CreateAdiosChannel.  Note, the string for each created redev::BidirectionalComm must match in the Server and Client calls.
+ * Client setup begins with creation of the redev::BidirectionalComm communication object via the call to redev::Redev::CreateChannel.  Note, the string for each created redev::BidirectionalComm must match in the Server and Client calls.
  *
  * Given that the data being transferred is a single integer and each Client and
  * Server is only running on a single process the data layout (`dest` and
@@ -57,7 +58,7 @@
  * \par Server Create Clients
  *
  * In the Client code only a single redev::BidirectionalComm is needed.
- * As there are two Clients, the Server must call redev::CreateAdiosChannel
+ * As there are two Clients, the Server must call redev::Redev::CreateChannel
  * twice; once for "client0" and again for "client1".
  *
  * \snippet{lineno} test_twoClients.cpp Server Create Clients
@@ -108,12 +109,11 @@
  * \snippet{lineno} test_twoClients.cpp Server Loop
  */
 
-void client(redev::Redev& rdv, const int clientId, adios2::Params params, const bool isSST) {
+void client(redev::Redev& rdv, const int clientId) {
   /// [Client Setup]
   std::stringstream clientName;
   clientName << "client" << clientId;
-  auto channel = rdv.CreateAdiosChannel(
-      clientName.str(), params, static_cast<redev::TransportType>(isSST));
+  auto channel = rdv.CreateChannel(clientName.str());
   auto commPair = channel.CreateComm<redev::LO>(clientName.str(),rdv.GetMPIComm());
 
   //setup outbound message
@@ -158,14 +158,12 @@ void client(redev::Redev& rdv, const int clientId, adios2::Params params, const 
   /// [Client Loop]
 }
 
-void server(redev::Redev& rdv, adios2::Params params, const bool isSST) {
+void server(redev::Redev& rdv) {
   /// [Server Create Clients]
 
-  auto client0_channel = rdv.CreateAdiosChannel(
-      "client0", params, static_cast<redev::TransportType>(isSST));
+  auto client0_channel = rdv.CreateChannel("client0");
   auto client0 = client0_channel.CreateComm<redev::LO>("client0", rdv.GetMPIComm());
-  auto client1_channel = rdv.CreateAdiosChannel(
-      "client1", params, static_cast<redev::TransportType>(isSST));
+  auto client1_channel = rdv.CreateChannel("client1");
   auto client1 = client1_channel.CreateComm<redev::LO>("client1", rdv.GetMPIComm());
   /// [Server Create Clients]
 
@@ -259,18 +257,24 @@ int main(int argc, char** argv) {
   }
   {
   /// [Main]
-  adios2::Params params{ {"Streaming", "On"}, {"OpenTimeoutSecs", "6"}};
+  const auto transport = static_cast<redev::TransportType>(isSST);
+  redev::Config config;
+  config.Global()
+    .SetTransport(transport)
+    .Set(redev::BackendName(transport), "OpenTimeoutSecs", "6");
   if(!isRdv) {
-    redev::Redev rdv(MPI_COMM_WORLD,redev::ProcessType::Client);
-    client(rdv,clientId,params,isSST);
+    redev::Redev rdv(MPI_COMM_WORLD, redev::ProcessType::Client, false,
+                     std::move(config));
+    client(rdv,clientId);
   } else {
     //dummy partition vector data
     const auto dim = 1;
     auto ranks = isRdv ? redev::LOs({0}) : redev::LOs(1);
     auto cuts = isRdv ? redev::Reals({0}) : redev::Reals(1);
     auto ptn = redev::RCBPtn(dim,ranks,cuts);
-    redev::Redev rdv(MPI_COMM_WORLD,redev::Partition{std::move(ptn)},redev::ProcessType::Server);
-    server(rdv,params,isSST);
+    redev::Redev rdv(MPI_COMM_WORLD, redev::Partition{std::move(ptn)},
+                     redev::ProcessType::Server, false, std::move(config));
+    server(rdv);
   }
   std::cout << "done\n";
   /// [Main]

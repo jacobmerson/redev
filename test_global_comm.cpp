@@ -19,11 +19,12 @@ int main(int argc, char** argv)
       auto cuts = isRdv ? redev::Reals({0}) : redev::Reals(1);
       auto ranks = isRdv ? redev::LOs({0}) : redev::LOs(1);
       auto ptn = redev::RCBPtn(dim, ranks, cuts);
-      redev::Redev rdv(localComm, redev::Partition{std::move(ptn)}, static_cast<redev::ProcessType>(isRdv));
+      redev::Config config;
+      config.Global().Set("adios2.bp4", "OpenTimeoutSecs", "4");
+      redev::Redev rdv(localComm, redev::Partition{std::move(ptn)}, static_cast<redev::ProcessType>(isRdv), false, std::move(config));
       // Initialize the Adios Channel
-      adios2::Params params{{"Streaming",       "On"},{"OpenTimeoutSecs", "4"}};
       std::string name = "bar";
-      auto channel = rdv.CreateAdiosChannel(name, params, redev::TransportType::BP4);
+      auto channel = rdv.CreateChannel(name);
       auto commPair = channel.CreateComm<redev::Real>(name, localComm, redev::CommType::Global);
 
       // send data to test global comm

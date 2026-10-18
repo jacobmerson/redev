@@ -25,13 +25,26 @@ find_package(ADIOS2 CONFIG 2.7.1 REQUIRED)
 #add_subdirectory(external)
 find_package(perfstubs REQUIRED)
 
+option(REDEV_ENABLE_YAML "Enable YAML configuration files (requires yaml-cpp)" OFF)
+if(REDEV_ENABLE_YAML)
+  find_package(yaml-cpp CONFIG REQUIRED)
+  if(TARGET yaml-cpp::yaml-cpp)
+    set(REDEV_YAML_TARGET yaml-cpp::yaml-cpp)
+  else()
+    set(REDEV_YAML_TARGET yaml-cpp)
+  endif()
+endif()
+message(STATUS "REDEV_ENABLE_YAML: ${REDEV_ENABLE_YAML}")
+
 set(REDEV_HEADERS
   redev.h
   redev_adios_channel.h
   redev_assert.h
+  redev_bootstrap.h
   redev_bidirectional_comm.h
   redev_channel.h
   redev_comm.h
+  redev_config.h
   redev_exclusive_scan.h
   redev_partition.h
   redev_profile.h
@@ -43,6 +56,8 @@ set(REDEV_HEADERS
 
 set(REDEV_SOURCES
   redev.cpp
+  redev_bootstrap.cpp
+  redev_config.cpp
   redev_time.cpp
   redev_assert.cpp
   redev_strings.cpp
@@ -57,6 +72,10 @@ if(HAS_ASAN)
   target_compile_options(redev PRIVATE -fsanitize=address -fno-omit-frame-pointer)
 endif()
 target_compile_definitions(redev PUBLIC PERFSTUBS_USE_TIMERS)
+if(REDEV_ENABLE_YAML)
+  target_link_libraries(redev PRIVATE ${REDEV_YAML_TARGET})
+  target_compile_definitions(redev PRIVATE REDEV_HAS_YAML)
+endif()
 
 include(CTest)
 if(BUILD_TESTING)
@@ -202,6 +221,24 @@ if(BUILD_TESTING)
   dual_mpi_test(TESTNAME test_global_comm TIMEOUT ${test_timeout}
           NAME1 rdv PROCS1 1 EXE1 ./test_global_comm ARGS1 0
           NAME2 app PROCS2 1 EXE2 ./test_global_comm ARGS2 1)
+  add_exe(test_config test_config.cpp)
+  if(REDEV_ENABLE_YAML)
+    target_compile_definitions(test_config PRIVATE REDEV_HAS_YAML)
+  endif()
+  mpi_test(test_config_2p 2 ./test_config)
+  add_exe(test_bootstrap test_bootstrap.cpp)
+  mpi_test(test_bootstrap_2p 2 ./test_bootstrap)
+  add_exe(test_config_transport test_config_transport.cpp)
+  dual_mpi_test(TESTNAME test_config_transport TIMEOUT ${test_timeout}
+    NAME1 rdv PROCS1 1 EXE1 ./test_config_transport ARGS1 1
+    NAME2 app PROCS2 1 EXE2 ./test_config_transport ARGS2 0)
+  add_exe(test_compat_adios_channel test_compat_adios_channel.cpp)
+  target_compile_options(test_compat_adios_channel PRIVATE -Wno-deprecated-declarations)
+  foreach(mode 0 1 2)
+    dual_mpi_test(TESTNAME test_compat_adios_channel_${mode} TIMEOUT ${test_timeout}
+      NAME1 rdv PROCS1 1 EXE1 ./test_compat_adios_channel ARGS1 1 ${mode}
+      NAME2 app PROCS2 1 EXE2 ./test_compat_adios_channel ARGS2 0 ${mode})
+  endforeach()
   set(isSST 0)
   add_exe(test_twoClients test_twoClients.cpp)
   tri_mpi_test(TESTNAME test_twoClients

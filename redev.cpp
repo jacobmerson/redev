@@ -3,6 +3,8 @@
 #include "redev_assert.h"
 #include "redev_git_version.h"
 #include "redev.h"
+#include "redev_bootstrap.h"
+#include <stdexcept>
 #include "redev_profile.h"
 #include "redev_exclusive_scan.h"
 #include <thread>         // std::this_thread::sleep_for
@@ -342,17 +344,21 @@ namespace redev {
     REDEV_ALWAYS_ASSERT(c2sEngine);
   }
 
-  Redev::Redev(MPI_Comm comm, Partition ptn, ProcessType processType, bool noClients)
-    : comm(comm), adios(comm), ptn(ptn), processType(processType), noClients(noClients) {
+  Redev::Redev(MPI_Comm comm, Partition ptn, ProcessType processType, bool noClients,
+               Config config)
+    : comm(comm), adios(comm), ptn(ptn), processType(processType), noClients(noClients),
+      config(std::move(config)) {
     PERFSTUBS_INITIALIZE();
     REDEV_FUNCTION_TIMER;
     int isInitialized = 0;
     MPI_Initialized(&isInitialized);
     REDEV_ALWAYS_ASSERT(isInitialized);
     UpdateRank();
+    this->config.LoadEnvironment(comm);
   }
-  Redev::Redev(MPI_Comm comm, ProcessType processType, bool noClients)
-    : comm(comm), adios(comm), ptn(), processType(processType), noClients(noClients) {
+  Redev::Redev(MPI_Comm comm, ProcessType processType, bool noClients, Config config)
+    : comm(comm), adios(comm), ptn(), processType(processType), noClients(noClients),
+      config(std::move(config)) {
       PERFSTUBS_INITIALIZE();
       REDEV_FUNCTION_TIMER;
       REDEV_ALWAYS_ASSERT(processType == ProcessType::Client);
@@ -360,7 +366,46 @@ namespace redev {
       MPI_Initialized(&isInitialized);
       REDEV_ALWAYS_ASSERT(isInitialized);
       UpdateRank();
+      this->config.LoadEnvironment(comm);
     }
+
+  Channel Redev::CreateChannel(std::string name, std::string path) {
+    REDEV_FUNCTION_TIMER;
+    if(!RankParticipates()) {
+      return NoOpChannel{};
+    }
+    const auto section = path + name;
+    auto transport = ExchangeTransport(section);
+    adios2::Params params;
+    for(const auto& [key, setting] : config.GetSettings(section, transport)) {
+      params[key] = setting.value;
+    }
+    return AdiosChannel{adios, comm, std::move(name), std::move(params), transport,
+                        processType, ptn, std::move(path), noClients};
+  }
+
+  TransportType Redev::ExchangeTransport(const std::string& section) {
+    REDEV_FUNCTION_TIMER;
+    if(processType == ProcessType::Server) {
+      const auto transport = config.GetTransport(section);
+      if(noClients) {
+        // without clients SST cannot connect; AdiosChannel falls back to BP4
+        return TransportType::BP4;
+      }
+      SendBootstrap(section, {{"transport", TransportName(transport)}}, comm);
+      return transport;
+    }
+    const auto data =
+      ReceiveBootstrap(section, GetBootstrapSettings(config, section), comm);
+    const auto it = data.find("transport");
+    if(it == data.end()) {
+      throw std::runtime_error("redev bootstrap for " + section +
+                               " has no transport");
+    }
+    return ParseTransport(it->second);
+  }
+
+  const Config& Redev::GetConfig() const noexcept { return config; }
 
   void AdiosChannel::Setup(adios2::IO& s2cIO, adios2::Engine& s2cEngine) {
     REDEV_FUNCTION_TIMER;

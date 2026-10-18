@@ -3,6 +3,7 @@
 #include "redev_comm.h"
 #include "redev_strings.h"
 #include "redev_types.h"
+#include "redev_config.h"
 #include <adios2.h>
 #include <array> // std::array
 #include <mpi.h>
@@ -169,10 +170,11 @@ public:
    * @param[in] noClients for testing without any clients present
    * The client processes should pass in an empty PartitionInterface object.
    * The server will send the client the needed partition information during
-   * the call to CreateAdiosChannel.
+   * the call to CreateChannel.
    */
   Redev(MPI_Comm comm, Partition ptn,
-        ProcessType processType = ProcessType::Server, bool noClients = false);
+        ProcessType processType = ProcessType::Server, bool noClients = false,
+        Config config = {});
   /**
    * Create a Redev client
    * @param[in] comm MPI communicator containing the ranks that are part of the
@@ -181,32 +183,42 @@ public:
    * @param[in] noClients for testing without any clients present
    * The client processes should pass in an empty PartitionInterface object.
    * The server will send the client the needed partition information during
-   * the call to CreateAdiosChannel.
+   * the call to CreateChannel.
    */
   Redev(MPI_Comm comm, ProcessType processType = ProcessType::Client,
-        bool noClients = false);
-  // FIXME UPDATE DOCS
-  /**
-   * Create a ADIOS2-based BidirectionalComm between the server and one client
-   * @param[in] name name for the communication channel, each BidirectionalComm
-   * must have a unique name
-   * @param[in] params list of ADIOS2 parameters controlling IO and Engine
-   * creation, see https://adios2.readthedocs.io/en/latest/engines/engines.html
-   * for the list of applicable parameters for the SST and BP4 engines
-   * @param[in] transportType by default the BP4 Engine is used, other transport
-   * types are available in the TransportType enum
+        bool noClients = false, Config config = {});
+  /*
+   * Both constructors merge REDEV_CONFIG / REDEV_CONFIG_YAML into config
+   * (Config::LoadEnvironment), so settings made in code at the Override scope
+   * still win over the environment.
    */
+
+  /**
+   * Create a channel between the server and one client. The transport and
+   * backend settings come from the Config, looked up by name.
+   * @param[in] name channel name
+   * @param[in] path prefix for backend resources (e.g. BP4 file location)
+   * The channel's settings come from the Config section named path + name.
+   */
+  [[nodiscard]] Channel CreateChannel(std::string name, std::string path = {});
+
+  [[nodiscard]] const Config& GetConfig() const noexcept;
+
+  /**
+   * Deprecated: use CreateChannel and set transport and backend settings
+   * through Config. params and transportType are applied to this channel's
+   * section at the Override scope, so other configured settings still apply.
+   */
+  [[deprecated("use Redev::CreateChannel with redev::Config")]]
   [[nodiscard]] Channel
   CreateAdiosChannel(std::string name, adios2::Params params,
                      TransportType transportType = TransportType::BP4,
                      std::string path = {}) {
     REDEV_FUNCTION_TIMER;
-    if(RankParticipates()) {
-      return AdiosChannel{
-          adios,       comm, std::move(name), std::move(params), transportType,
-          processType, ptn,  std::move(path), noClients};
-    }
-    return NoOpChannel{};
+    config.Channel(path + name)
+      .SetTransport(transportType, ConfigScope::Override)
+      .Set(BackendName(transportType), params, ConfigScope::Override);
+    return CreateChannel(std::move(name), std::move(path));
   }
   [[nodiscard]] ProcessType GetProcessType() const noexcept;
   [[nodiscard]] const Partition &GetPartition() const noexcept;
@@ -214,12 +226,18 @@ public:
   [[nodiscard]] MPI_Comm GetMPIComm() const noexcept;
 private:
   void UpdateRank();
+  /*
+   * The server sends the channel's transport to the client through the
+   * channel's bootstrap file (see redev_bootstrap.h).
+   */
+  TransportType ExchangeTransport(const std::string& section);
   ProcessType processType;
   bool noClients; // true: no clients will be connected, false: otherwise
   MPI_Comm comm;
   adios2::ADIOS adios;
   int rank;
   Partition ptn;
+  Config config;
 };
 
 } // namespace redev

@@ -12,10 +12,10 @@ void classPtnTest(int rank, bool isRdv) {
     expectedE2R[expectedEnts[i]] = expectedRanks[i];
   auto ranks = isRdv ? expectedRanks : redev::LOs();
   auto ents = isRdv ? expectedEnts : redev::ClassPtn::ModelEntVec();
-  redev::Redev rdv(MPI_COMM_WORLD,redev::Partition{std::in_place_type<redev::ClassPtn>, MPI_COMM_WORLD,ranks,ents},static_cast<redev::ProcessType>(isRdv));
-  adios2::Params params{ {"Streaming", "On"}, {"OpenTimeoutSecs", "2"}};
-  auto channel = rdv.CreateAdiosChannel("foo", params,
-                                                    redev::TransportType::BP4);
+  redev::Config config;
+  config.Global().Set("adios2.bp4", "OpenTimeoutSecs", "2");
+  redev::Redev rdv(MPI_COMM_WORLD,redev::Partition{std::in_place_type<redev::ClassPtn>, MPI_COMM_WORLD,ranks,ents},static_cast<redev::ProcessType>(isRdv), false, std::move(config));
+  auto channel = rdv.CreateChannel("foo");
   auto commPair = channel.CreateComm<redev::LO>("foo", MPI_COMM_WORLD);
   if(!isRdv) {
     const auto& partition = std::get<redev::ClassPtn>(rdv.GetPartition());

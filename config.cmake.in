@@ -10,4 +10,7 @@ enable_language(C) #required for MPI::MPI_C
 find_dependency(MPI)
 find_dependency(ADIOS2 CONFIG HINTS @ADIOS2_DIR@)
 find_dependency(perfstubs CONFIG HINTS @perfstubs_DIR@)
+if(@REDEV_ENABLE_YAML@)
+  find_dependency(yaml-cpp CONFIG HINTS @yaml-cpp_DIR@)
+endif()
 
